@@ -1,0 +1,511 @@
+---
+title: "Presidential Race or Popularity Contest?"
+author: "Dayanara Diaz Vargas"
+date: "December 15th, 2021"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+
+```{r, message = FALSE, echo = TRUE, warning = FALSE}
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(psych)
+library(qwraps2)
+options(qwraps2_markup = 'markdown')
+library(knitr)
+library(DT)
+library(sandwich)
+library(lmtest)
+library(broom)
+library(huxtable)
+library(reshape)
+library(gridExtra)
+library(grid)
+library(tinytex)
+library(readxl)
+library(ggcorrplot)
+library(corrplot)
+library(wordcloud)
+library(tidyverse)
+library(kableExtra)
+library(stargazer)
+library(ggridges)
+library(regclass)
+theme_set(theme_minimal())
+library(caret)
+
+```
+
+
+# Data Sources
+
+
+
+In order to conduct this analysis, we will perform a logit regression, since our dependent variable is a binary dummy variable. Our dataset is a time series comprising the last 60 years (1960-2020). Our variables are listed below:
+
+
+### Variables 
+
+Dependent variable | Source
+---------------------------------------------------------------------------------------------------------------|-------------
+President's Political Party (dummy variable starting the year they were elected, Democrat = 1  Republican = 0) | Statista
+
+
+
+
+
+
+
+
+
+Independent variables                                                                    | Source
+ -------------------------------------------------------------------------------------------|---------------------------------------------------
+ Inflation Rate (Annual CPI Percentage Change from Year Before, Seasonally adjusted)         | Federal Reserve
+ Unemployment Rate (Seasonally Adjusted)                                                     | Bureau of Labor Statistics
+ Real Gross Domestic Product, Billions of Chained 2012 Dollars, Quarterly, Seasonally Adjusted Annual Rate                                             | Federal Reserve Economic Data, Federal Reserve Bank of St. Louis
+ Per Capita Personal Income (Current Dollars)                                 | Regional Economic Analysis Project
+ Consumer Price Index for All Urban Consumers (CPI-U) 12-Month Percent Change (1982-84=100)                 | Bureau of Labor Statistics
+ Percentage of Christian Households                                                                        | Gallup.com web scraped
+ Percentage of White People, Not Hispanic (thousands)                                            | US Census Bureau
+ Educational Attainment (measured as thousands of people with a Bachelor's degree or more)   | US Census Bureau
+ Income Share of the Top 5% Income Recipients                                                | US Census Bureau
+ Sentiment                                                                                   | Own web scraped data from The New York Times
+ Articles                                                                                    | Own web scraped data from The New York Times
+
+
+
+##### Web Scrape
+The web scrape was done in Python, using the name of each president that was in power for each year as the keyword to extract all relevant articles. All articles included in our analysis, correspond to articles published by the New York Times that have the name of the president in power tagged. The function extracts each of those articles' titles, dates, and other details into an Excel with the name of the president. In total, this function generated 6 Excel files. From there, the file "Clean data.R" was created. This R script imports each of these Excel documents, cleans the data, and then exports the cleaned data as the files "NYT Sentiment Analysis by Year.xlsx", "Month_df.xlsx",  and "NYT Word Freq by Year.xlsx".
+
+
+# Limitations 
+The historical Census data the Percentage of White People, Not Hispanic, and Income Share of the Top 5% Income Recipients was not available for the entire period of analysis: 8 and 7 observations are missing respectively. However, it is still useful to consider the increasing trend in these statistics in the United States over the last forty years. 
+
+
+# Data Manipulations
+Since all of the missing values (NA's) were in the first few years of the series, it was decided to substitute those NA's with the minimum value of the column. This proved to be the most wise approach, since in the earlier years all historical data was at its lowest.
+
+
+
+# Data Cleaning
+### Web Scraped Data
+```{r, message = TRUE, echo= TRUE, warning = FALSE}
+# source("Clean data.R")
+# setwd("C:/Users/scyth/OneDrive - Northeastern University/Math/Project/Presidents By Month/Data")
+# source("Make dataframe.R")
+```
+
+
+# Data Description
+```{r, message = TRUE, echo= TRUE, warning = FALSE}
+setwd("C:/Users/scyth/OneDrive - Northeastern University/Math/Project/Presidents By Month/Data")
+df <- read_excel("Month_df.xlsx")
+df <- df[,-5]
+setwd("C:/Users/scyth/OneDrive - Northeastern University/Math/Project")
+df1 <- read_excel("NYT Sentiment Analysis by Year.xlsx")
+
+# fix NA's with min
+df$`Percentage White Households`[is.na(df$`Percentage White Households`)] <- min(df$`Percentage White Households`, na.rm = T)
+df$`Percentage White Households`[is.na(df$`Percentage White Households`)] <- min(df$`Percentage White Households`, na.rm = T)
+df$`Educational Attainment`[is.na(df$`Educational Attainment`)] <- min(df$`Educational Attainment`, na.rm = T)
+df$`Top five percent income share`[is.na(df$`Top five percent income share`)] <- min(df$`Top five percent income share`, na.rm = T)
+
+df$CPI <- as.numeric(df$CPI)
+df$GDP <- as.numeric(df$GDP)
+df$PPCI <- as.numeric(df$PPCI)
+
+
+temp <- describe(df[, -c(1, 2, 14)])
+
+temp <- data.frame(lapply(temp, function(x) round(x, 3)))
+
+rownames(temp) <- c(paste0("Party", footnote_marker_number(1)), paste0("Unemployment Rate", footnote_marker_number(2)), paste0("Christian (%)", footnote_marker_number(3)), paste0("White (%)", footnote_marker_number(3)), paste0("Educational Attainment", footnote_marker_number(3)) , paste0("Top 5 (%) Income Share", footnote_marker_number(3)), paste0("CPI", footnote_marker_number(4)),paste0("GDP", footnote_marker_number(5)),paste0("PPCI", footnote_marker_number(6)), paste0("Sentiment", footnote_marker_number(7)), paste0("Articles", footnote_marker_number(8)))
+
+colnames(temp) <- c("Vars","N","Mean","SD","Median","Trimmed Mean", "MAD","Min","Max","Range","Skew","Kurtosis", "SE")
+
+kbl(temp[, c(-1,-2,-6,-12)], caption = "Summary Statistics", align = "l", booktabs = T, escape = F) %>%
+  kable_paper(latex_options = c("striped"), full_width = F) %>%
+  kable_styling(latex_options = "hold_position") %>%
+  footnote(general = c("n = 717 | Sources and Descriptions:"),
+           number = c("1 if Democrat, 0 if not | Statista", "Bureau of Labor Statistics", "US Census Bureau", "Annual CPI Percentage Change from Year Before, Seasonally adjusted | World Bank", "Federal Reserve Economic Data", "Per Capita Personal Income | Regional Economic Analysis Project", "Annual Average Sentiment of Articles | The New York Times", "Total of Articles by Year | The New York Times")) %>%
+  row_spec(0, bold = T)%>%
+  column_spec(1, bold = T) %>%
+  landscape() # %>%
+#  save_kable("inst/test.png")
+
+
+```
+
+The mean Consumer Price Index for our time period is 3.64, with a maximum of 13.6% and a minimum of 0.6. Similarly, the mean unemployment rate is 6%, with a maximum of 9.7% and a minimum of 3.5%. On the other hand, the GDP has reached a minimum of 3,234.087 billions of dollars and 19,202.310 billions of dollars between 1960-2020. 
+
+
+
+\newpage
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+
+
+
+# my dat
+df1 <- df[,-c(2,14)]
+  # scale
+  df1[,c(2:length(df1))] <- scale(df1[,c(2:length(df1))])
+  
+    # make dataset
+    df2 <- df1[,c(1,7)]
+    df2$Name <- "Top 5 Inc. Share"
+    colnames(df2)[2] <- "var"
+    
+    
+    df3 <- df1[,c(1,3)]
+    df3$Name <- "Unemployment"
+    colnames(df3)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+   
+    df3 <- df1[,c(1,9)]
+    df3$Name <- "GDP"
+    colnames(df3)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+    
+    
+    
+    
+   
+    
+
+ggplot(df2,                            # Draw ggplot2 time series plot
+       aes(x = Year,
+           y = var,
+           col = Name)) +
+  geom_line() +
+labs(x = "Year", y = "Scaled Values", title = "Figure 1: Time series of Different Variables" , caption = "n = 717, Sources: US Census Bureau, World Bank, and FRED") +
+  scale_colour_discrete(name="Variables")
+```
+The unemployment rate follows the trend in the Top 5% Income Share Recipients with a lag, increasing with recessions. In regards to the GDP, four major peaks, without taking into account the Covid-19 pandemic recession can be identified: one in the early 1960s, one after the  staglation of 1973, one after the  stagflation of 1979-80, and one after the 2008 financial crisis. The trend in GDP is upward, regardless of short-term decreases due to recessions. Fluctuations in unemployment can be seen on the second chart: four major peaks include one around 1960, around 1974, 1982, 1992, 2010, and 2020.
+
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+df2 <- c()
+df3 <- c() 
+
+  # make dataset
+    
+     df2 <- df1[,c(1,10)]
+    df2$Name <- "Per Capita Personal Income"
+    colnames(df2)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+    
+     df3 <- df1[,c(1,8)]
+    df3$Name <- "Consumer Price Index"
+    colnames(df3)[2] <- "var"
+    df2 <- rbind(df2, df3)
+    
+    
+  
+  
+    
+   
+    
+
+ggplot(df2,                            # Draw ggplot2 time series plot
+       aes(x = Year,
+           y = var,
+           col = Name)) +
+  geom_line() +
+labs(x = "Year", y = "Scaled Values", title = "Figure 2: Time series of Different Variables" , caption = "n = 717, Sources: Regional Economic Analysis Project and World Bank") +
+  scale_colour_discrete(name="Variables")
+```
+
+
+The consumer price index has experienced multiple fluctuations,  especially around periods of increased uncertainty and  economic hardship. More over, the Per Capita Personal Income has increased over the years, following a linear trend.
+
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+df2 <- c()
+df3 <- c()
+
+       df2 <- df1[,c(1,5)]
+    df2$Name <- "Christian (%)"
+    colnames(df2)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+    
+       df3 <- df1[,c(1,6)]
+    df3$Name <- "White Households (%)"
+    colnames(df3)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+    
+       df3 <- df1[,c(1,7)]
+    df3$Name <- "Education"
+    colnames(df3)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+
+    ggplot(df2,                            # Draw ggplot2 time series plot
+       aes(x = Year,
+           y = var,
+           col = Name)) +
+  geom_line() +
+labs(x = "Year", y = "Scaled Values", title = "Figure 3: Time series of Different Variables" , caption = "n = 717, Source: US Census Bureau") +
+  scale_colour_discrete(name="Variables")
+    
+```
+The percentage of people who are  Christian is decreasing during  our period selected for analysis. Most Americans still identified as Christians in  2020, whether Protestant, Catholic or  any other denomination (around 65%). The percentage of white households has decreased steadily during our selected period. There is also an interesting negative relationship between Christian and White people in the United States.
+
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+df2 <- c()
+df3 <- c()
+
+# ----      
+    
+       df2 <- df1[,c(1,11)]
+    df2$Name <- "Sentiment"
+    colnames(df2)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+    
+ 
+       df3 <- df1[,c(1,12)]
+    df3$Name <- "Articles Published"
+    colnames(df3)[2] <- "var"
+    
+    df2 <- rbind(df2, df3)
+
+    ggplot(df2,                            # Draw ggplot2 time series plot
+       aes(x = Year,
+           y = var,
+           col = Name)) +
+  geom_line() +
+labs(x = "Year", y = "Scaled Values", title = "Figure 4: Time series of Different Variables" , caption = "n = 717, Source: The New York Times") +
+  scale_colour_discrete(name="Variables")
+```
+There does not seem to be much variance in the amount of articles published in the New York Times each month for the past 60 years. However the 
+
+## Figure 5
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+# wordcloud
+setwd("C:/Users/scyth/OneDrive - Northeastern University/Math/Project")
+NYT_Word_Freq_by_Year <- read_excel("NYT Word Freq by Year.xlsx")
+
+word_freq <- NYT_Word_Freq_by_Year[,c(3,4)] %>%
+        group_by(word) %>%
+        dplyr::summarize(val = sum(n)) 
+
+          # graph           
+            set.seed(1234) # for reproducibility 
+            wordcloud(words = word_freq$word, freq = word_freq$val, min.freq = 1, max.words=160, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2"))  
+                
+```
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+# lollipop
+    # clean data
+         common_words <- word_freq[word_freq[,2] > 500,] 
+
+    # Horizontal version
+      # rearrange data by descending order
+        A <- common_words %>%
+          arrange(val) %>%
+          mutate(word = factor(word, unique(word)))
+        
+          # graph
+            ggplot(A, aes(x=word, y=val)) +
+            geom_segment(aes(x=word, xend=word, y=0, yend=val), color="skyblue") +
+            geom_point( color="blue", size=4, alpha=0.6) +
+            theme_light() +
+            coord_flip() +
+            theme(
+              panel.grid.major.y = element_blank(),
+              panel.border = element_blank(),
+              axis.ticks.y = element_blank()
+            ) +
+labs(x = "Words", y = "Frequency", title = "Figure 6: Most Common Words in Articles" , caption = "Articles = 92,607, Source: The New York Times")
+            
+
+
+```
+
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE, fig.width = 15, fig.asp = .8}
+# common words by president
+# ggplot2 Plot:
+ Most_Common_President <- NYT_Word_Freq_by_Year %>% group_by(President) %>% filter(n == min(n, na.rm = TRUE))
+              Most_Common_President <- Most_Common_President[!duplicated(Most_Common_President[,'President']),]
+                Most_Common_President <- Most_Common_President[-11,]
+
+    # Horizontal version
+      # rearrange data by descending order
+        A <- Most_Common_President %>%
+          arrange(n) %>%
+          mutate(word = factor(word, unique(word)))
+                                
+# png("Freq by Pres.png") 
+    ggplot(A, aes(word, n)) + 
+    geom_col() +
+    coord_flip() +
+    labs(x = "Word \n", y = "\n Count ", title = "Figure 7: Frequent Words In NYT by President \n", caption = "Articles = 92,607, Source: The New York Times") +
+    geom_text(aes(label = President), hjust = 0, size = 2.7, colour = "red", fontface = "bold") +
+    theme(plot.title = element_text(hjust = 0.5), 
+        axis.title.x = element_text(face="bold", colour="darkblue", size = 12),
+        axis.title.y = element_text(face="bold", colour="darkblue", size = 12)) 
+      
+
+# dev.off()
+```
+\newpage
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE, fig.width = 11, fig.asp = .8}
+dfg <- data.frame(df$`Presidents Party`)
+colnames(dfg)[1] <- "Party"
+dfg$Party[dfg$Party == 0] <- "Republican"
+dfg$Party[dfg$Party == 1] <- "Democrat"
+dfg <- as.data.frame(table(dfg))
+
+colnames(dfg) <- c("Party", "Months")
+# Inside bars
+
+ggplot(data=dfg, aes(x=Party, y=Months)) +
+  geom_bar(stat="identity", fill="steelblue")+
+  geom_text(aes(label=Months), vjust=1.6, color="white", size=3.5)+
+  theme_minimal()+
+labs(title = "Months Each Party Has Been in Power", caption = "n = 717, Data from 1960-2020")
+
+```
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE, fig.width = 11, fig.asp = .8}
+
+corr <- round(cor(df1, method = c("pearson")), 1)
+ggcorrplot(corr, hc.order = TRUE, type = "lower",
+   lab = TRUE)+
+labs(title = "Figure 8: Correlation Matrix", caption = "n = 717, Data from 1960-2020")
+
+```
+
+
+A few coefficients that are worth mentioning for the purposes of this study are those between the inflation rate and consumer confidence (-0.59), between the unemployment rate and consumer confidence (-0.42), between the yearly percentage change in GDP and consumer confidence (0.6)
+
+
+\newpage
+
+
+
+
+# Empirical Results
+
+We will now proceed to calculating logit regressions with our data. The first regression only considers economic variables, while the second includes economic and demographic variables that may  explain election outcomes.
+
+### Regressions
+
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+df$`Presidents Party` <- factor(df$`Presidents Party`)
+
+colnames(df)<- c("Year", "Month", "Party", "Unemployment", "Christian", "White", "Education", "five", "CPI", "GDP", "PPCI", "sent", "n", "President")   
+
+
+# only economic variables
+logit_reg1 <- glm(Party ~ Unemployment + five + CPI + log(PPCI) + log(GDP), data = df, family=binomial)
+
+#economic and demographic variables
+logit_reg2 <- glm(Party ~ Unemployment + five + CPI + log(PPCI) + log(GDP) +  Christian + White + log(Education), data = df, family=binomial)
+
+#economic, demographic variables, and media coverage
+logit_reg3 <- glm(Party ~ Unemployment + five + CPI + log(PPCI) + log(GDP) +  Christian + White + log(Education) + sent + n, data = df, family=binomial)
+
+
+
+A <- huxreg(logit_reg1, logit_reg2, logit_reg3, statistics = c("N. obs." = "nobs", "R squared" = "r.squared", "Adj R Squared" = "adj.r.squared","P value" = "p.value"), coefs = c("Unemployment Rate" = "Unemployment", "Top Five Percent of Income Share"= "five", "Consumer Price Index"="CPI", "log of Per Capita Personal Income" = "log(PPCI)", "log of Gross Domestic Income" = "log(GDP)", "Christian (%)" = "Christian", "White Households (%)"= "White", "log of Educational Attainment" = "log(Education)", "Sentiment" = "sent", "Articles" = "n"), stars = c(`*` = 0.1, `**` = 0.05, `***` = 0.01), error_pos = "same") %>%
+  set_caption("Logit regressions for multiple variables")
+
+huxtable::font_size(A) <- 10
+# huxtable::guess_knitr_output_format()
+huxtable::height(A) <- 1
+huxtable::width(A) <- 1
+  
+A
+
+
+```
+
+### Multicollinearity checks
+##### Model 1
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+VIF(logit_reg1)
+```
+
+##### Model 2
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+VIF(logit_reg2)
+```
+
+##### Model 3
+```{r, message = FALSE, echo= TRUE, warning = FALSE}
+VIF(logit_reg3)
+```
+
+### Goodness of Fit
+##### Model 1
+```{r}
+
+
+#convert defaults from decimals to 1's and 0's
+yvar <- ifelse(logit_reg1$fitted.values > 0.5, 1, 0)
+yvar <- as.data.frame(yvar)
+confusionMatrix(as.factor(yvar$yvar), df$Party)
+```
+
+
+##### Model 2
+```{r}
+#convert defaults from decimals to 1's and 0's
+yvar <- ifelse(logit_reg2$fitted.values > 0.5, 1, 0)
+yvar <- as.data.frame(yvar)
+confusionMatrix(as.factor(yvar$yvar), df$Party)
+```
+
+##### Model 3
+```{r}
+
+#convert defaults from decimals to 1's and 0's
+yvar <- ifelse(logit_reg3$fitted.values > 0.5, 1, 0)
+yvar <- as.data.frame(yvar)
+confusionMatrix(as.factor(yvar$yvar), df$Party)
+```
+
+
+# Results Interpretation
+
+Out of all the models, Model (3) has the highest accuracy (and scores higher in all other goodness of fit statistics) - so it provides the best fit. We will evaluate the results of Model (3), since it has the best predictive power. All the variables are statistically significant at the 0.01 significance level, but the number of total articles published seem to not be statistically significant at any significance level, after controlling for all key factors. 
+
+Regarding this, we can see that for every one unit change in "The top five percent income share", the log odds of a democrat candidate (versus non-democrat) of being elected, increases by 1.020. Additionally, for every one percenta point change in the "Unemployment Rate", the log odds of a democrat candidate (versus non-democrat) of being elected, increases by 0.489. More over, for every one percentage change in the number of people over 25 years of age with a bacherlors or more, the log odds of a democrat candidate (versus non-democrat) of being elected, increases by 26.731. Education is the variable with the highest economic impact over the probability of a Democrat candidate winning the elections. Similarly, the variable with lowest impact is the Consumer Price Index, where for any additional unit increase it reflects a 0.192 decrease in the log odds of a democrat candidate (versus non-democrat) of being elected.
+
+
+Articles did not exhibit statistically significant relationships at the 0.1 significance level. This may be explained by the lack of varaince on the sample. 
+
+
+# Bibliography
+
+Brenan, M. (2021, November 20). Americans' Trust in Media Dips to second lowest on record. Gallup.com. Retrieved December 3, 2021, from https://news.gallup.com/poll/355526/americans-trust-media-dips-second-lowest-record.aspx
+Campbell, J. E., & Mann, T. E. (1996, July 28). Forecasting the presidential election: What can we learn from the models? Brookings. Retrieved December 2, 2021, from https://www.brookings.edu/articles/forecasting-the-presidential-election-what-can-we-learn-from-the-models/. 
+Erikson, R. S. (1989). Economic Conditions and The Presidential Vote. The American Political Science Review, 83(2), 567–573. https://doi.org/10.2307/1962406
+Fair, R. C. (2018, November 14). Presidential and Congressional Vote-Share Equations: November 2018 Update. Retrieved December 10, 2021. 
+Gallup. (2021, August 13). In-depth Topics: Religion. Gallup.com. Retrieved December 3, 2021, from https://news.gallup.com/poll/1690/religion.aspx 
+Housman, P. (2020, October 28). Does Allan Lichtman stand by his "13 keys" prediction of a Joe Biden win? American University. Retrieved December 2, 2021, from https://www.american.edu/cas/news/13-keys-election-prediction.cfm 
+Keys to the White House. PollyVote. (n.d.). Retrieved December 3, 2021, from https://pollyvote.com/en/components/models/mixed/keys-to-the-white-house/ 
+
+ 
+
+
